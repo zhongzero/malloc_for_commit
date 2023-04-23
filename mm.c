@@ -65,28 +65,50 @@
 #define NEXT_P(p) ((char*)(p)+GET_SIZE(HEAD(p))+8)
 #define PRE_P(p) ((char*)(p)-8- GET_SIZE((char*)(p)-8) )
 
+#define NEXT_LIST_P(p) (mem_heap_lo()+GET(p))
+#define PRE_LIST_P(p) (mem_heap_lo()+GET((char*)(p)+4))
+
+#define INIT_SIZE 8
+
+#define LIST_BEGIN mem_heap_lo()
+#define LIST_END mem_heap_lo()
+
 /*
  * mm_init - Called when a new trace starts.
  */
 int mm_init(void){
-	// printf("\ninit %lx %lx %lx %lx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
+	// printf("\ninit %llx %llx %llx %llx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
+	mem_sbrk(INIT_SIZE);//p=mem_heap_lo()
+	PUT(LIST_BEGIN,LIST_END-LIST_BEGIN);//存储空闲链表第一个块的位置(记录的是与mem_heap_lo()的插值 (2^32 bit) )(一开始为0)
 	return 0;
 }
 
-/*
- * malloc - Allocate a block by incrementing the brk pointer.
- *			Always allocate a block whose size is a multiple of the alignment.
- */
+
+static void AddToExplicitList(void *ptr){
+	void *ptr2=NEXT_LIST_P(LIST_BEGIN);
+	// printf("AddToExplicitList: ptr=%llx,ptr2=%llx\n",ptr,ptr2);
+	PUT(LIST_BEGIN,ptr-mem_heap_lo()),PUT(ptr+4,LIST_BEGIN-mem_heap_lo());
+	PUT(ptr,ptr2-mem_heap_lo());
+	if(ptr2!=LIST_END)PUT(ptr2+4,ptr-mem_heap_lo());
+}
+static void DeleteFromExplicitList(void *ptr){
+	void *preP=PRE_LIST_P(ptr);
+	void *nextP=NEXT_LIST_P(ptr);
+	// printf("DeleteFromExplicitList: ptr=%llx,preP=%llx,nextP=%llx\n",ptr,preP,nextP);
+	PUT(preP,nextP-mem_heap_lo());
+	if(nextP!=LIST_END)PUT(nextP+4,preP-mem_heap_lo());
+}
 static void *extend_heap(size_t size){
 	unsigned int newsize=ALIGN(size);
 	unsigned char *p=mem_sbrk(newsize+8);
 	if ((long)p < 0)return NULL;
 	//malloc前8字节分别记录上个块的脚部和这个块的头部，接着是分配给用户的空间(这个块的尾部直接溢出到下个块记录)
+	//注意，对于一个已经被释放的空闲块，在第9~16字节记录上一个和下一个空闲块在哪里(由于8字节对齐，保证每个块至少有8字节的空间是分配给用户的)
 	PUT(p+4,newsize|1);
 	PUT(p+8+newsize,newsize|1);
-	// printf("p=%lx,SIZE_PTR(p)=%lx\n",p,SIZE_PTR(p));
-	// printf("malloc %d: %lx\n",size,p+8);
-	// printf("make %lx %lx\n",p+4,p+8+newsize);
+	// printf("p=%llx,SIZE_PTR(p)=%llx\n",p,SIZE_PTR(p));
+	// printf("malloc %d: %llx\n",size,p+8);
+	// printf("make %llx %llx\n",p+4,p+8+newsize);
 	return p+8;
 }
 static void SPLIT(void *p,unsigned int size1){
@@ -95,33 +117,39 @@ static void SPLIT(void *p,unsigned int size1){
 	PUT(TAIL(p),size2|0);
 	PUT(HEAD(p),size1|1);
 	PUT(p+size1,size1|1);
+	AddToExplicitList(p+size1+8);
 }
 
+/*
+ * malloc - Allocate a block by incrementing the brk pointer.
+ *			Always allocate a block whose size is a multiple of the alignment.
+ */
 void *malloc(size_t size){
 	if(size==0)return NULL;
-	// printf("%lx %lx %lx %lx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
-	void *currentp=mem_heap_lo()+8;
-	while(currentp<=mem_heap_hi()){
-		// printf("currentp: %lx\n",currentp);
+	// printf("%llx %llx %llx %llx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
+	void *currentp=NEXT_LIST_P(LIST_BEGIN);
+	while(currentp!=LIST_END){
+		// printf("currentp: %llx\n",currentp);
 		if(!GET_ALLOC(HEAD(currentp)) && GET_SIZE(HEAD(currentp))>=ALIGN(size)){
-			// printf("check %lx %lx\n",HEAD(currentp),TAIL(currentp));
+			// printf("check %llx %llx\n",HEAD(currentp),TAIL(currentp));
 			if(GET_SIZE(HEAD(currentp))>ALIGN(size)+8)SPLIT(currentp,ALIGN(size));
 			PUT(HEAD(currentp),GET_SIZE(HEAD(currentp))|1);
 			PUT(TAIL(currentp),GET_SIZE(TAIL(currentp))|1);
-			// printf("!!! malloc %d: %lx\n",size,currentp);
+			DeleteFromExplicitList(currentp);
+			// printf("!!! malloc %d: %llx\n",size,currentp);
 			return currentp;
 		}
-		currentp=NEXT_P(currentp);
+		currentp=NEXT_LIST_P(currentp);
 	}
 	return extend_heap(size);
 }
-
 static bool try_merge(void *ptr1,void *ptr2){
-	// printf("%lx %lx\n",ptr1,ptr2);
+	// printf("try_merge: %llx %llx\n",ptr1,ptr2);
 	if(GET_ALLOC(HEAD(ptr1)) || GET_ALLOC(HEAD(ptr2)) ) return 0;
 	unsigned int totsize=GET_SIZE(HEAD(ptr1))+GET_SIZE(HEAD(ptr2))+8;
 	PUT(HEAD(ptr1),totsize|0);
 	PUT(TAIL(ptr2),totsize|0);
+	DeleteFromExplicitList(ptr2);
 	return 1;
 }
 /*
@@ -131,10 +159,11 @@ static bool try_merge(void *ptr1,void *ptr2){
 void free(void *ptr){
 	/*Get gcc to be quiet */
 	if(ptr==NULL)return;
-	// printf("free %lx\n",ptr);
+	// printf("free %llx\n",ptr);
 	PUT(HEAD(ptr),GET_SIZE(HEAD(ptr))|0);
 	PUT(TAIL(ptr),GET_SIZE(TAIL(ptr))|0);
-	if(ptr!=mem_heap_lo()+8){
+	AddToExplicitList(ptr);
+	if(ptr!=mem_heap_lo()+INIT_SIZE+8){
 		void *ptr_pre=PRE_P(ptr);
 		if(try_merge(ptr_pre,ptr))ptr=ptr_pre;
 	}
@@ -198,7 +227,31 @@ void *calloc (size_t nmemb, size_t size){
  * mm_checkheap - There are no bugs in my code, so I don't need to check,
  *			so nah!
  */
+// void mm_checkheap(int verbose){
+// 	/*Get gcc to be quiet. */
+// 	printf("-------begin check-------\n");
+// 	void *p=LIST_BEGIN;
+// 	p=NEXT_LIST_P(p);
+// 	while(p!=LIST_END){
+// 		printf("%llx\n",p);
+// 		p=NEXT_LIST_P(p);
+// 	}
+// 	printf("-------end check-------\n");
+// 	verbose = verbose;
+// }
 void mm_checkheap(int verbose){
 	/*Get gcc to be quiet. */
+	printf("-------begin check-------\n");
+	void *pre_p=LIST_BEGIN,*p=NEXT_LIST_P(pre_p);
+	while(p!=LIST_END){
+		printf("%llx\n",(unsigned long long)p);
+		if(PRE_LIST_P(p)!=pre_p){
+			printf("Wrong !!!\n");
+			assert(0);
+		}
+		pre_p=p;
+		p=NEXT_LIST_P(p);
+	}
+	printf("-------end check-------\n");
 	verbose = verbose;
 }
