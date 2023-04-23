@@ -1,45 +1,19 @@
-#####################################################################
-# CS:APP Malloc Lab
-# Handout files for students
-######################################################################
+# malloc 作业 OJ 提交参考 repo
 
-***********
-Main Files:
-***********
+## 提交方式
 
-mdriver
-        Once you've run make, run ./mdriver to test your solution.
+1. 请使用最新版题面 repo 的代码框架
 
-traces/
-	Directory that contains the trace files that the driver uses
-	to test your solution. Files orners.rep, short2.rep, and malloc.rep
-	are tiny trace files that you can use for debugging correctness.
+2. 请保证 `make all` 得到的可执行文件名为 `code`
 
-**********************************
-Other support files for the driver
-**********************************
+3. 请参考 [commit 4f5acd7](https://github.com/PaperL/test_malloc/commit/4f5acd7d1ded4d89f9b6b0e861863e1c03e36c90) 修改 `clock.c`
 
-config.h	Configures the malloc lab driver
-fsecs.{c,h}	Wrapper function for the different timer packages
-clock.{c,h}	Routines for accessing the Pentium and Alpha cycle counters
-fcyc.{c,h}	Timer functions based on cycle counters
-ftimer.{c,h}	Timer functions based on interval timers and gettimeofday()
-memlib.{c,h}	Models the heap and sbrk function
+## 说明
 
-*******************************
-Building and running the driver
-*******************************
-To build the driver, type "make" to the shell.
+- OJ 评测仅供参考，如有任何问题以本地评测为准。请保留一份本地评测结果
 
-To run the driver on a tiny test trace:
+- 本 repo 仅为示例，你最终的提交代码应当开启 `-Werror` 编译选项
 
-	unix> ./mdriver -V -f traces/malloc.rep
+- OJ 仅使用编译出的可执行文件，不需要 `traces` 内容
 
-To get a list of the driver flags:
-
-	unix> ./mdriver -h
-
-The -V option prints out helpful tracing information
-
-
-
+- 如有任何问题请联系助教

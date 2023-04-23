@@ -22,4 +22,3 @@ driverlib.o: driverlib.c driverlib.h
 
 clean:
 	rm -f *~ *.o code
-
