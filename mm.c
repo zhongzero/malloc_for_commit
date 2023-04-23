@@ -138,7 +138,7 @@ void free(void *ptr){
 		void *ptr_pre=PRE_P(ptr);
 		if(try_merge(ptr_pre,ptr))ptr=ptr_pre;
 	}
-	if(NEXT_P(ptr)<=mem_heap_hi()){
+	if((void*)NEXT_P(ptr)<=mem_heap_hi()){
 		try_merge(ptr,NEXT_P(ptr));
 	}
 }
