@@ -58,7 +58,7 @@
 
 
 /*是否使用segregated lists*/
-// #define SEGREGATE
+#define SEGREGATE
 /*下面三选一*/
 // #define FIRST_FIT__AND_INSERT_HEAD
 #define FIRST_FIT__AND_INSERT_TAIL
@@ -67,7 +67,7 @@
 #ifdef SEGREGATE
 #define MAXCHECKLISTNUM 3//设当前寻找的块大小在list(x),则表示最多检查到list(x+MAXCHECKLISTNUM) (开成11表示全部检查)
 #else
-#define MAXCHECKNUM 30//最多往后寻找的块个数
+#define MAXCHECKNUM 40//最多往后寻找的块个数
 #endif
 
 #define max(a,b) ((a)>(b)?(a):(b))
