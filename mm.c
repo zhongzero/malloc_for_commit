@@ -55,8 +55,8 @@
 /*是否使用segregated lists*/
 #define SEGREGATE
 /*下面三选一*/
-// #define FIRST_FIT__AND_INSERT_HEAD
-#define FIRST_FIT__AND_INSERT_TAIL
+#define FIRST_FIT__AND_INSERT_HEAD
+// #define FIRST_FIT__AND_INSERT_TAIL
 // #define BEST_FIT
 
 #define max(a,b) ((a)>(b)?(a):(b))
