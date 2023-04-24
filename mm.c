@@ -60,8 +60,8 @@
 /*是否使用segregated lists*/
 #define SEGREGATE
 /*下面三选一*/
-// #define FIRST_FIT__AND_INSERT_HEAD
-#define FIRST_FIT__AND_INSERT_TAIL
+#define FIRST_FIT__AND_INSERT_HEAD
+// #define FIRST_FIT__AND_INSERT_TAIL
 // #define BEST_FIT
 
 #define max(a,b) ((a)>(b)?(a):(b))
@@ -225,7 +225,8 @@ void *malloc(size_t size){
 	#ifdef FIRST_FIT__AND_INSERT_HEAD
 	{//first fit;等价于insert new free block into head
 		int id=GetListId(ALIGN(size));
-		while(id<=11){
+		int lid=min(id+3,11);
+		while(id<=lid){
 			void *currentp=NEXT_LIST_P2(LIST_BEGIN2(id));
 			while(currentp!=LIST_END2(id)){
 				// printf("currentp: %llx\n",currentp);
@@ -249,7 +250,7 @@ void *malloc(size_t size){
 	#ifdef FIRST_FIT__AND_INSERT_TAIL
 	{//first fit;等价于insert new free block into tail
 		int id=GetListId(ALIGN(size));
-		int lid=min(id+2,11);
+		int lid=min(id+3,11);
 		while(id<=lid){
 			// printf("size=%u,id=%d\n",size,id);
 			void *currentp=PRE_LIST_P2(LIST_END2(id));
