@@ -9,6 +9,11 @@
  * This code is correct and blazingly fast, but very bad usage-wise since
  * it never frees anything.
  */
+/*
+最前面几字节记录链表头尾结点(不同写法的分配方式不同)，接着是每一个块
+对于每一个块，前面8字节记录隐式链表的pre/next，且在二进制的最低位记录该块是否空闲，后面的字节全部分配给用户使用
+若是该块成为空闲块，则用记录显式链表的pre/next(直接利用原来分配给用户的那块空间)
+*/
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,13 +58,14 @@
 
 
 /*是否使用segregated lists*/
-// #define SEGREGATE
+#define SEGREGATE
 /*下面三选一*/
 // #define FIRST_FIT__AND_INSERT_HEAD
 #define FIRST_FIT__AND_INSERT_TAIL
 // #define BEST_FIT
 
 #define max(a,b) ((a)>(b)?(a):(b))
+#define min(a,b) ((a)<(b)?(a):(b))
 
 #define GET(p) (*(unsigned int*)(p))
 #define PUT(p,val) (*(unsigned int*)(p)=(val))
@@ -78,8 +84,8 @@
 
 #ifdef SEGREGATE
 #define INIT_SIZE (8*10)
-#define LIST_BEGIN(p) (mem_heap_lo()+((p)-2)*8)
-#define LIST_END(p) (mem_heap_lo()+((p)-2)*8)
+#define LIST_BEGIN(id) (mem_heap_lo()+((id)-2)*8)
+#define LIST_END(id) (mem_heap_lo()+((id)-2)*8)
 #else
 #define INIT_SIZE 8
 #define LIST_BEGIN mem_heap_lo()
@@ -87,27 +93,27 @@
 #endif
 
 // for opt
-#define NEXT_LIST_P2(p) (heap_begin+GET(p))
-#define PRE_LIST_P2(p) (heap_begin+GET((char*)(p)+4))
+#define NEXT_LIST_P2(id) (heap_begin+GET(id))
+#define PRE_LIST_P2(id) (heap_begin+GET((char*)(id)+4))
 
 #ifdef SEGREGATE
-#define LIST_BEGIN2(p) (heap_begin+((p)-2)*8)
-#define LIST_END2(p) (heap_begin+((p)-2)*8)
+#define LIST_BEGIN2(id) (heap_begin+((id)-2)*8)
+#define LIST_END2(id) (heap_begin+((id)-2)*8)
 #else
 #define LIST_BEGIN2 heap_begin
 #define LIST_END2 heap_begin
 #endif
 
 /*
+ * mm_init - Called when a new trace starts.
+ */
+#ifdef SEGREGATE
+/*
+前面80字节记录10个链表头结点(尾结点压成和头节点共用)
 [2^2,2^3),[2^3,2^4),...,[2^10,2^11)  ,  [2^11,2^32)
 [2^p,2^(p+1))  ,(2<=p<=10)
 [2^11,2^32)    ,(p=11)
 */
-
-/*
- * mm_init - Called when a new trace starts.
- */
-#ifdef SEGREGATE
 int mm_init(void){
 	// printf("\ninit %llx %llx %llx %llx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
 	mem_sbrk(INIT_SIZE);//p=mem_heap_lo()
@@ -144,6 +150,7 @@ static inline int GetListId(unsigned int size){
 	// for(int i=10;i>=2;i--)if((size>>i)&1)return i;
 	return -1;
 }
+//将该块添加到显式链表中
 static void AddToExplicitList(void *ptr){
 	int id=GetListId(GET_SIZE(HEAD(ptr)));
 	void *heap_begin=mem_heap_lo();
@@ -178,7 +185,7 @@ static void DeleteFromExplicitList(void *ptr){
 
 
 
-
+//申请新的堆空间
 static void *extend_heap(size_t size){
 	unsigned int newsize=ALIGN(size);
 	unsigned char *p=mem_sbrk(newsize+8);
@@ -192,6 +199,7 @@ static void *extend_heap(size_t size){
 	// printf("make %llx %llx\n",p+4,p+8+newsize);
 	return p+8;
 }
+//将一个空闲块分裂成两部分,并把其中一部分标记成已用，并返回其指针位置
 static void* SPLIT(void *p,unsigned int size1){
 	unsigned int size2=GET_SIZE(HEAD(p))-size1-8;
 	bool flag=1;
@@ -212,13 +220,14 @@ static void* SPLIT(void *p,unsigned int size1){
 #ifdef SEGREGATE
 void *malloc(size_t size){
 	if(size==0)return NULL;
+	void *heap_begin=mem_heap_lo();
 	// printf("%llx %llx %llx %llx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
 	#ifdef FIRST_FIT__AND_INSERT_HEAD
 	{//first fit;等价于insert new free block into head
 		int id=GetListId(ALIGN(size));
 		while(id<=11){
-			void *currentp=NEXT_LIST_P(LIST_BEGIN(id));
-			while(currentp!=LIST_END(id)){
+			void *currentp=NEXT_LIST_P2(LIST_BEGIN2(id));
+			while(currentp!=LIST_END2(id)){
 				// printf("currentp: %llx\n",currentp);
 				if(GET_SIZE(HEAD(currentp))>=ALIGN(size)){
 					// printf("check %llx %llx\n",HEAD(currentp),TAIL(currentp));
@@ -231,7 +240,7 @@ void *malloc(size_t size){
 					// printf("!!! malloc %d: %llx\n",size,currentp);
 					return currentp;
 				}
-				currentp=NEXT_LIST_P(currentp);
+				currentp=NEXT_LIST_P2(currentp);
 			}
 			id++;
 		}
@@ -239,9 +248,9 @@ void *malloc(size_t size){
 	#endif
 	#ifdef FIRST_FIT__AND_INSERT_TAIL
 	{//first fit;等价于insert new free block into tail
-		void *heap_begin=mem_heap_lo();
 		int id=GetListId(ALIGN(size));
-		while(id<=11){
+		int lid=min(id+3,11);
+		while(id<=lid){
 			// printf("size=%u,id=%d\n",size,id);
 			void *currentp=PRE_LIST_P2(LIST_END2(id));
 			while(currentp!=LIST_BEGIN2(id)){
@@ -267,9 +276,9 @@ void *malloc(size_t size){
 	{//best fit
 		int id=GetListId(ALIGN(size));
 		while(id<=11){
-			void *currentp=NEXT_LIST_P(LIST_BEGIN(id));
+			void *currentp=NEXT_LIST_P2(LIST_BEGIN2(id));
 			void *bestP=NULL;
-			while(currentp!=LIST_END(id)){
+			while(currentp!=LIST_END2(id)){
 				// printf("currentp: %llx\n",currentp);
 				if(!GET_ALLOC(HEAD(currentp)) && GET_SIZE(HEAD(currentp))>=ALIGN(size)){
 					if(bestP==NULL || GET_SIZE(HEAD(currentp))<GET_SIZE(HEAD(bestP)))bestP=currentp;
@@ -292,6 +301,7 @@ void *malloc(size_t size){
 	#endif
 	return extend_heap(size);
 }
+//尝试merge两个相邻块(如果它们都是空闲块就合并)
 static bool try_merge(void *ptr1,void *ptr2){
 	// printf("try_merge: %llx %llx\n",ptr1,ptr2);
 	if(GET_ALLOC(HEAD(ptr1)) || GET_ALLOC(HEAD(ptr2)) ) return 0;
@@ -308,11 +318,12 @@ static bool try_merge(void *ptr1,void *ptr2){
 // int totNum=0,totSum=0;
 void *malloc(size_t size){
 	if(size==0)return NULL;
+	void *heap_begin=mem_heap_lo();
 	// printf("%llx %llx %llx %llx\n",mem_heap_lo(),mem_heap_hi(),mem_heapsize(),mem_sbrk(0));
 	#ifdef FIRST_FIT__AND_INSERT_HEAD
 	{//first fit;等价于insert new free block into head
-		void *currentp=NEXT_LIST_P(LIST_BEGIN);
-		while(currentp!=LIST_END){
+		void *currentp=NEXT_LIST_P2(LIST_BEGIN2);
+		while(currentp!=LIST_END2){
 			// printf("currentp: %llx\n",currentp);
 			if(GET_SIZE(HEAD(currentp))>=ALIGN(size)){
 				// printf("check %llx %llx\n",HEAD(currentp),TAIL(currentp));
@@ -325,15 +336,15 @@ void *malloc(size_t size){
 				// printf("!!! malloc %d: %llx\n",size,currentp);
 				return currentp;
 			}
-			currentp=NEXT_LIST_P(currentp);
+			currentp=NEXT_LIST_P2(currentp);
 		}
 	}
 	#endif
 	#ifdef FIRST_FIT__AND_INSERT_TAIL
 	{//first fit;等价于insert new free block into tail
 		// totNum++;
-		void *currentp=PRE_LIST_P(LIST_END);
-		while(currentp!=LIST_BEGIN){
+		void *currentp=PRE_LIST_P2(LIST_END2);
+		while(currentp!=LIST_BEGIN2){
 			// totSum++;
 			// printf("currentp: %llx\n",currentp);
 			if(GET_SIZE(HEAD(currentp))>=ALIGN(size)){
@@ -347,21 +358,21 @@ void *malloc(size_t size){
 				// printf("!!! malloc %d: %llx\n",size,currentp);
 				return currentp;
 			}
-			currentp=PRE_LIST_P(currentp);
+			currentp=PRE_LIST_P2(currentp);
 		}
 		// if(totNum%10000==0)printf("totNum=%d,totSum/totNum=%lf\n",totNum,1.0*totSum/totNum);
 	}
 	#endif
 	#ifdef BEST_FIT
 	{//best fit
-		void *currentp=NEXT_LIST_P(LIST_BEGIN);
+		void *currentp=NEXT_LIST_P2(LIST_BEGIN2);
 		void *bestP=NULL;
-		while(currentp!=LIST_END){
+		while(currentp!=LIST_END2){
 			// printf("currentp: %llx\n",currentp);
 			if(!GET_ALLOC(HEAD(currentp)) && GET_SIZE(HEAD(currentp))>=ALIGN(size)){
 				if(bestP==NULL || GET_SIZE(HEAD(currentp))<GET_SIZE(HEAD(bestP)))bestP=currentp;
 			}
-			currentp=NEXT_LIST_P(currentp);
+			currentp=NEXT_LIST_P2(currentp);
 		}
 		if(bestP!=NULL){
 			if(GET_SIZE(HEAD(bestP))>ALIGN(size)+8)bestP=SPLIT(bestP,ALIGN(size));
@@ -465,38 +476,76 @@ void *calloc (size_t nmemb, size_t size){
  */
 #ifdef SEGREGATE
 void mm_checkheap(int verbose){
+	/*
+	INIT_SIZE
+	*/
 	/*Get gcc to be quiet. */
-	printf("-------begin check-------\n");
+	// printf("-------begin check-------\n");
+	/*check explicit segregated lists*/
+	int num1=0,num2=0;
 	for(int i=2;i<=11;i++){
+		if(LIST_BEGIN(i)!=mem_heap_lo()+((i)-2)*8)assert(0);
 		void *pre_p=LIST_BEGIN(i),*p=NEXT_LIST_P(pre_p);
 		while(p!=LIST_END(i)){
-			printf("%llx\n",(unsigned long long)p);
-			if(PRE_LIST_P(p)!=pre_p){
-				printf("Wrong !!!\n");
-				assert(0);
-			}
+			if(p<mem_heap_lo()+80||p>mem_heap_hi())assert(0);
+			if(PRE_LIST_P(p)!=pre_p)assert(0);
+			if(GET_ALLOC(HEAD(p)))assert(0);
+			num1++;
 			pre_p=p;
 			p=NEXT_LIST_P(p);
 		}
 	}
-	printf("-------end check-------\n");
+	/*check implicit list*/
+	void *pre_p=mem_heap_lo()+INIT_SIZE+8,*p=NEXT_P(pre_p);
+	if(pre_p<=mem_heap_hi()&& !GET_ALLOC(HEAD(pre_p)) )num2++;
+	while(p<=mem_heap_hi()){
+		assert(PRE_P(p)==pre_p);
+		assert(GET_SIZE(HEAD(p))%8==0);
+		assert((unsigned long long)p%8==0);
+		if(!GET_ALLOC(HEAD(p)))num2++;
+		assert( GET_ALLOC(HEAD(pre_p)) || GET_ALLOC(HEAD(p)) );
+		assert(TAIL(pre_p)+4==HEAD(p));
+		pre_p=p;
+		p=NEXT_P(p);
+	}
+	// printf("%d %d\n",num1,num2);
+	assert(num1==num2);
+	
+	// printf("-------end check-------\n");
 	verbose=verbose;
 }
 #else
 void mm_checkheap(int verbose){
+	/*
+	INIT_SIZE
+	*/
 	/*Get gcc to be quiet. */
-	printf("-------begin check-------\n");
+	// printf("-------begin check-------\n");
+	int num1=0,num2=0;
 	void *pre_p=LIST_BEGIN,*p=NEXT_LIST_P(pre_p);
 	while(p!=LIST_END){
-		printf("%llx\n",(unsigned long long)p);
-		if(PRE_LIST_P(p)!=pre_p){
-			printf("Wrong !!!\n");
-			assert(0);
-		}
+		if(PRE_LIST_P(p)!=pre_p)assert(0);
+		if(GET_ALLOC(HEAD(p)))assert(0);
+		num1++;
 		pre_p=p;
 		p=NEXT_LIST_P(p);
 	}
-	printf("-------end check-------\n");
+	/*check implicit list*/
+	pre_p=mem_heap_lo()+INIT_SIZE+8,p=NEXT_P(pre_p);
+	if(pre_p<=mem_heap_hi()&& !GET_ALLOC(HEAD(pre_p)) )num2++;
+	while(p<=mem_heap_hi()){
+		assert(PRE_P(p)==pre_p);
+		assert(GET_SIZE(HEAD(p))%8==0);
+		assert((unsigned long long)p%8==0);
+		if(!GET_ALLOC(HEAD(p)))num2++;
+		assert( GET_ALLOC(HEAD(pre_p)) || GET_ALLOC(HEAD(p)) );
+		assert(TAIL(pre_p)+4==HEAD(p));
+		pre_p=p;
+		p=NEXT_P(p);
+	}
+	// printf("%d %d\n",num1,num2);
+	assert(num1==num2);
+	// printf("-------end check-------\n");
 	verbose=verbose;
 }
 #endif
