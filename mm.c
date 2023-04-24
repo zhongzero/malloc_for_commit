@@ -249,7 +249,7 @@ void *malloc(size_t size){
 	#ifdef FIRST_FIT__AND_INSERT_TAIL
 	{//first fit;等价于insert new free block into tail
 		int id=GetListId(ALIGN(size));
-		int lid=min(id+3,11);
+		int lid=min(id+2,11);
 		while(id<=lid){
 			// printf("size=%u,id=%d\n",size,id);
 			void *currentp=PRE_LIST_P2(LIST_END2(id));
