@@ -60,8 +60,8 @@
 /*是否使用segregated lists*/
 // #define SEGREGATE
 /*下面三选一*/
-// #define FIRST_FIT__AND_INSERT_HEAD
-#define FIRST_FIT__AND_INSERT_TAIL
+#define FIRST_FIT__AND_INSERT_HEAD
+// #define FIRST_FIT__AND_INSERT_TAIL
 // #define BEST_FIT
 
 #ifdef SEGREGATE
@@ -331,6 +331,7 @@ void *malloc(size_t size){
 	#ifdef FIRST_FIT__AND_INSERT_HEAD
 	{//first fit;等价于insert new free block into head
 		void *currentp=NEXT_LIST_P2(LIST_BEGIN2);
+		int checknum=0;
 		while(currentp!=LIST_END2){
 			// printf("currentp: %llx\n",currentp);
 			if(GET_SIZE(HEAD(currentp))>=ALIGN(size)){
@@ -345,6 +346,7 @@ void *malloc(size_t size){
 				return currentp;
 			}
 			currentp=NEXT_LIST_P2(currentp);
+			if(++checknum>=MAXCHECKNUM)break;
 		}
 	}
 	#endif
